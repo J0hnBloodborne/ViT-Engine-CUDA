@@ -8,6 +8,7 @@ setup(
             name='vit_cuda',
             sources=[
                 'binding.cpp',
+                'attention_wrapper.cpp',
                 'patch_embed.cu',
                 'pos_embed.cu',
                 'attention.cu',
