@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Git pre-push hook wrapper — calls the Python runner which handles cross-platform logic.
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+PY_SCRIPT="$REPO_ROOT/scripts/pre_push.py"
+
+if [ -x "$REPO_ROOT/vitvenv/bin/python" ]; then
+  PY="$REPO_ROOT/vitvenv/bin/python"
+elif [ -x "$REPO_ROOT/vitvenv/Scripts/python.exe" ]; then
+  PY="$REPO_ROOT/vitvenv/Scripts/python.exe"
+else
+  PY="python"
+fi
+
+echo "Running pre-push checks (build + tests)..."
+"$PY" "$PY_SCRIPT"
+EXIT_CODE=$?
+if [ $EXIT_CODE -ne 0 ]; then
+  echo "Pre-push checks failed (exit code: $EXIT_CODE). Aborting push."
+  exit $EXIT_CODE
+fi
+
+echo "Pre-push checks passed. Proceeding with push."
+exit 0
