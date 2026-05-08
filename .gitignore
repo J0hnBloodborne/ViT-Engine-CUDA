@@ -4,3 +4,4 @@ dist/
 *.so
 *.egg-info
 vitvenv/
+*.pyd

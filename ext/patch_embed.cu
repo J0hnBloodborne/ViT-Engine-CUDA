@@ -1,5 +1,4 @@
 #include <cuda_runtime.h>
-
 #define IMG_SIZE 224
 #define PATCH_SIZE 16
 #define PATCHES_PER_SIDE (IMG_SIZE / PATCH_SIZE)
@@ -10,7 +9,7 @@
 #define PATCH_AREA 256
 #define PATCH_VOLUME 768
 
-__global__ void patch_embed_kernel(const float* img, const float* weights, float* out) {
+__global__ void patch_embed_kernel(float* img, float* weights, float* out) {
     int patch_idx = blockIdx.x; 
     int batch_idx = blockIdx.y; // One batch per block
     int tid = threadIdx.x;
@@ -21,7 +20,7 @@ __global__ void patch_embed_kernel(const float* img, const float* weights, float
     int patch_col = (patch_idx % PATCHES_PER_SIDE) * PATCH_SIZE;
 
     // Find the starting point of the current batch in the input image
-    const float* batch_img = img + (batch_idx * CHANNELS * IMG_SIZE * IMG_SIZE);
+    float* batch_img = img + (batch_idx * CHANNELS * IMG_SIZE * IMG_SIZE);
 
     // Collaboratively load the patch into shared memory. Each thread loads one pixel (across all channels).
     #pragma unroll
@@ -39,8 +38,8 @@ __global__ void patch_embed_kernel(const float* img, const float* weights, float
         int out_dim = tid * COARSE_FACTOR + step;
         
         // Ampere architecture can do 128-bit float4 operations, so we can process 4 elements at a time.
-        const float4* weights_vec = reinterpret_cast<const float4*>(&weights[out_dim * PATCH_VOLUME]);
-        const float4* patch_vec = reinterpret_cast<const float4*>(patch_s);
+         float4* weights_vec = reinterpret_cast<float4*>(&weights[out_dim * PATCH_VOLUME]);
+         float4* patch_vec = reinterpret_cast<float4*>(patch_s);
         
         float sum = 0.0f;
         
