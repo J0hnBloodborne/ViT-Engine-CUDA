@@ -44,8 +44,10 @@ def main():
     # Ensure pip, setuptools, wheel are current
     run([py, '-m', 'pip', 'install', '--upgrade', 'pip', 'setuptools', 'wheel'])
 
-    # Install editable extension
-    run([py, '-m', 'pip', 'install', '-e', os.path.join(repo_root, 'ext')])
+    # Install editable extension without build isolation so the venv's installed packages (e.g., torch)
+    # are available during the build step. This avoids PEP517 isolated build environments
+    # which may not contain large local deps like torch.
+    run([py, '-m', 'pip', 'install', '-e', os.path.join(repo_root, 'ext'), '--no-build-isolation'])
 
     # Ensure pytest
     try:
