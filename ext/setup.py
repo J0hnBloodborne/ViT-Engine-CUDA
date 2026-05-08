@@ -9,6 +9,7 @@ setup(
             sources=[
                 'binding.cpp',
                 'attention_wrapper.cpp',
+                'patch_embed_wrapper.cpp',
                 'patch_embed.cu',
                 'pos_embed.cu',
                 'attention.cu',

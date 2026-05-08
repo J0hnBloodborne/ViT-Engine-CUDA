@@ -1,0 +1,52 @@
+name: CI - Build and kernel tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      kernels:
+        description: 'Comma-separated kernel tests to run (e.g., patch_embed,attention)'
+        required: false
+        default: 'patch_embed'
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake git libssl-dev pkg-config
+          # Try to provide nvcc; if not available the build step will fail and tests will be skipped
+          sudo apt-get install -y nvidia-cuda-toolkit || true
+
+      - name: Install Python build deps
+        run: |
+          python -m pip install --upgrade pip setuptools wheel pytest
+
+      - name: Install PyTorch (attempt CUDA 13.0 wheel)
+        run: |
+          python -m pip install --index-url https://download.pytorch.org/whl/cu130 torch torchvision || python -m pip install torch torchvision
+
+      - name: Build and install extension
+        run: |
+          cd ext
+          python setup.py install
+
+      - name: Run tests
+        env:
+          KERNELS: ${{ github.event.inputs.kernels }}
+        run: |
+          if [ -z "$KERNELS" ]; then
+            export KERNELS=patch_embed
+          fi
+          pytest -q
