@@ -1,24 +1,21 @@
 #include <cuda_runtime.h>
-#include <torch/extension.h>
 #define SEQ_LEN 197 // 196 patches + 1 CLS token
 #define EMBED_DIM 768
 #define VEC_SIZE 4
 #define THREADS_PER_BLOCK 192 // 768 / 4
 
-__global__ void pos_embed_kernel(float* patches, float* cls_token, float* pos_embed, float* out) {
+__global__ void pos_encoding_kernel(float* patches, float* cls_token, float* pos_embed, float* out) {
     int batch_idx = blockIdx.y;
     int seq_idx = blockIdx.x;
     int tid = threadIdx.x;
 
     int out_offset = (batch_idx * SEQ_LEN * EMBED_DIM) + (seq_idx * EMBED_DIM) + (tid * VEC_SIZE);
 
-    // Load positional embedding vector
     float4* pos_vec = reinterpret_cast<float4*>(&pos_embed[seq_idx * EMBED_DIM]);
     float4 p_val = pos_vec[tid];
 
     if (seq_idx == 0) {
-        // 0 maps to the classification token
-        float4* cls_vec = reinterpret_cast<float4*>(cls_token);
+        float4* cls_vec = reinterpret_cast<float4*>(&cls_token[batch_idx * EMBED_DIM]);
         float4 c_val = cls_vec[tid];
         
         float4 res;
@@ -30,7 +27,6 @@ __global__ void pos_embed_kernel(float* patches, float* cls_token, float* pos_em
         reinterpret_cast<float4*>(&out[out_offset])[0] = res;
     } 
     else {
-        // 1-196 map to the embedded patches
         int patch_offset = (batch_idx * 196 * EMBED_DIM) + ((seq_idx - 1) * EMBED_DIM) + (tid * VEC_SIZE);
         float4* patch_vec = reinterpret_cast<float4*>(&patches[patch_offset]);
         float4 patch_val = patch_vec[0];
@@ -45,8 +41,8 @@ __global__ void pos_embed_kernel(float* patches, float* cls_token, float* pos_em
     }
 }
 
-void launch_pos_embed(float* patches, float* cls_token, float* pos_embed, float* out, int batch_size) {
+void launch_pos_encoding(float* patches, float* cls_token, float* pos_embed, float* out, int batch_size) {
     dim3 grid(SEQ_LEN, batch_size);
     dim3 block(THREADS_PER_BLOCK);
-    pos_embed_kernel<<<grid, block>>>(patches, cls_token, pos_embed, out);
+    pos_encoding_kernel<<<grid, block>>>(patches, cls_token, pos_embed, out);
 }

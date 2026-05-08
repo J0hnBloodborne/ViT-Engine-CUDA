@@ -1,9 +1,9 @@
 #include <torch/extension.h>
 
 // Forward declaration of the CUDA launcher implemented in pos_encoding.cu
-void launch_pos_embed(float* patches, float* cls_token, float* pos_embed, float* out, int batch_size);
+void launch_pos_encoding(float* patches, float* cls_token, float* pos_embed, float* out, int batch_size);
 
-at::Tensor pos_embed(at::Tensor patches, at::Tensor cls_token, at::Tensor pos_embeddings) { // Defines the C++ function accepting PyTorch tensors
+at::Tensor pos_encoding(at::Tensor patches, at::Tensor cls_token, at::Tensor pos_embeddings) { // Defines the C++ function accepting PyTorch tensors
     // Pytorch checks for input validity
 	TORCH_CHECK(patches.is_cuda(), "patches must be a CUDA tensor");
 	TORCH_CHECK(cls_token.is_cuda(), "cls_token must be a CUDA tensor");
@@ -31,7 +31,7 @@ at::Tensor pos_embed(at::Tensor patches, at::Tensor cls_token, at::Tensor pos_em
 
 	at::Tensor out = at::zeros({batch_size, num_patches + 1, embed_dim}, p_c.options()); // Creates an output tensor initialized to zeros with shape [B, SEQ_LEN, embed_dim]
 
-	launch_pos_embed(p_c.data_ptr<float>(), c_c.data_ptr<float>(), pos_c.data_ptr<float>(), out.data_ptr<float>(), (int)batch_size); // Calls the CUDA launcher function
+	launch_pos_encoding(p_c.data_ptr<float>(), c_c.data_ptr<float>(), pos_c.data_ptr<float>(), out.data_ptr<float>(), (int)batch_size); // Calls the CUDA launcher function
 
 	return out;
 }

@@ -9,9 +9,9 @@ setup(
             sources=[
                 'binding.cpp',
                 'attention_wrapper.cpp',
-                'patch_embed_wrapper.cpp',
+                'pos_encoding_wrapper.cpp',
                 'patch_embed.cu',
-                'pos_embed.cu',
+                'pos_encoding.cu',
                 'attention.cu',
                 'mlp.cu',
                 'layernorm.cu',
