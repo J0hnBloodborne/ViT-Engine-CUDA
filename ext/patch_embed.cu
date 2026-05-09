@@ -14,7 +14,7 @@ __global__ void patch_embed_kernel(float* img, float* weights, float* out) {
     int batch_idx = blockIdx.y; // One batch per block
     int tid = threadIdx.x;
 
-    __shared__ float patch_s[PATCH_VOLUME];
+    __shared__ float patch_s[PATCH_VOLUME+1];
 
     int patch_row = (patch_idx / PATCHES_PER_SIDE) * PATCH_SIZE;
     int patch_col = (patch_idx % PATCHES_PER_SIDE) * PATCH_SIZE;

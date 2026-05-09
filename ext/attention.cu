@@ -104,7 +104,11 @@ __global__ void flash_attn_2_ampere_768(
         // Compute S_j = Q_i @ K_j^T
         for (int j = 0; j < BC; ++j) {
             float4 k_vec = s_K[buf_curr][j * VECS_PER_ROW + vec_idx];
-            float dot = q_vec.x * k_vec.x + q_vec.y * k_vec.y + q_vec.z * k_vec.z + q_vec.w * k_vec.w;
+            float dot = 0.0f;
+            dot = __fmaf_rn(q_vec.x, k_vec.x, dot);
+            dot = __fmaf_rn(q_vec.y, k_vec.y, dot);
+            dot = __fmaf_rn(q_vec.z, k_vec.z, dot);
+            dot = __fmaf_rn(q_vec.w, k_vec.w, dot);
             
             // Fast Ampere intra-warp reduction
             dot += __shfl_down_sync(0xffffffff, dot, 8);
@@ -142,10 +146,10 @@ __global__ void flash_attn_2_ampere_768(
 
         for (int j = 0; j < BC; ++j) {
             float4 v_vec = s_V[buf_curr][j * VECS_PER_ROW + vec_idx];
-            acc.x += S[j] * v_vec.x;
-            acc.y += S[j] * v_vec.y;
-            acc.z += S[j] * v_vec.z;
-            acc.w += S[j] * v_vec.w;
+            acc.x = __fmaf_rn(S[j], v_vec.x, acc.x);
+            acc.y = __fmaf_rn(S[j], v_vec.y, acc.y);
+            acc.z = __fmaf_rn(S[j], v_vec.z, acc.z);
+            acc.w = __fmaf_rn(S[j], v_vec.w, acc.w);
         }
 
         m = m_new;
