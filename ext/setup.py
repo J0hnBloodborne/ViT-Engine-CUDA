@@ -24,6 +24,8 @@ setup(
                     '-O3',
                     '--allow-unsupported-compiler',
                     '-gencode=arch=compute_86,code=sm_86',
+                    '-use_fast_math',
+                    '--expt-relaxed-constexpr',
                 ],
             },
         )

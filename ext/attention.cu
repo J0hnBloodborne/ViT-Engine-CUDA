@@ -157,10 +157,10 @@ __global__ void flash_attn_2_ampere_768(
 
     // Finalize output
     if (global_row_idx < N) {
-        acc.x /= l;
-        acc.y /= l;
-        acc.z /= l;
-        acc.w /= l;
+        acc.x = __fdividef(acc.x, l);
+        acc.y = __fdividef(acc.y, l);
+        acc.z = __fdividef(acc.z, l);
+        acc.w = __fdividef(acc.w, l);
         
         int o_offset = base_offset + (global_row_idx * E) + (h * D) + (vec_idx * VEC_SIZE);
         reinterpret_cast<float4*>(O + o_offset)[0] = acc;
