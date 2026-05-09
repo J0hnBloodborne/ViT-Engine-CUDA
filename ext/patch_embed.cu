@@ -1,64 +1,114 @@
 #include <cuda_runtime.h>
+#include <math.h>
+
 #define IMG_SIZE 224
 #define PATCH_SIZE 16
 #define PATCHES_PER_SIDE (IMG_SIZE / PATCH_SIZE)
 #define CHANNELS 3
-#define COARSE_FACTOR 3 // Fixed to prevent out-of-bounds (256 * 3 = 768)
 #define EMBED_DIM 768
 #define NUM_PATCHES 196
-#define PATCH_AREA 256
-#define PATCH_VOLUME 768
+#define PATCH_VOLUME 768 // 3 * 16 * 16
 
-__global__ void patch_embed_kernel(float* img, float* weights, float* out) {
+__inline__ __device__ float warp_reduce_sum(float val) {
+    val += __shfl_down_sync(0xffffffff, val, 16);
+    val += __shfl_down_sync(0xffffffff, val, 8);
+    val += __shfl_down_sync(0xffffffff, val, 4);
+    val += __shfl_down_sync(0xffffffff, val, 2);
+    val += __shfl_down_sync(0xffffffff, val, 1);
+    return val;
+}
+
+// 192 threads per block (6 warps).
+__global__ void patch_embed_kernel(const float* __restrict__ img, const float* __restrict__ weights, float* __restrict__ out) {
     int patch_idx = blockIdx.x; 
-    int batch_idx = blockIdx.y; // One batch per block
-    int tid = threadIdx.x;
+    int batch_idx = blockIdx.y;
+    int tid = threadIdx.x; // 0 to 191
 
-    __shared__ float patch_s[PATCH_VOLUME+1];
+    // 192 float4s = 768 floats
+    __shared__ float4 patch_s[192];
 
     int patch_row = (patch_idx / PATCHES_PER_SIDE) * PATCH_SIZE;
     int patch_col = (patch_idx % PATCHES_PER_SIDE) * PATCH_SIZE;
 
-    // Find the starting point of the current batch in the input image
-    float* batch_img = img + (batch_idx * CHANNELS * IMG_SIZE * IMG_SIZE);
+    const float* batch_img = img + (batch_idx * CHANNELS * IMG_SIZE * IMG_SIZE);
 
-    // Collaboratively load the patch into shared memory. Each thread loads one pixel (across all channels).
-    #pragma unroll
-    for (int c = 0; c < CHANNELS; c++) {
-        int py = tid / PATCH_SIZE;
-        int px = tid % PATCH_SIZE;
-        int global_idx = c * IMG_SIZE * IMG_SIZE + (patch_row + py) * IMG_SIZE + (patch_col + px);
-        patch_s[c * PATCH_AREA + tid] = batch_img[global_idx];
-    }
+    // Each thread loads exactly 1 float4 from the image
+    int c = tid / 64;           // Channel 0, 1, or 2
+    int tid_in_c = tid % 64;    // 0 to 63
+    int py = tid_in_c / 4;      // 0 to 15 (row within patch)
+    int px_vec = tid_in_c % 4;  // 0 to 3 (float4 index within row)
+
+    int global_offset = c * IMG_SIZE * IMG_SIZE + (patch_row + py) * IMG_SIZE + (patch_col + px_vec * 4);
+    
+    // Load 1 float4 (16 bytes) cohesively per thread
+    patch_s[tid] = reinterpret_cast<const float4*>(batch_img + global_offset)[0];
 
     __syncthreads();
 
-    #pragma unroll
-    for (int step = 0; step < COARSE_FACTOR; step++) {
-        int out_dim = tid * COARSE_FACTOR + step;
+    // Now, compute the dot products. We have 768 output dimensions.
+    // 6 warps, each computes 4 output dimensions per iteration. 
+    // Total 24 dimensions per iteration. 768 / 24 = 32 iterations.
+    
+    int warp_id = tid / 32;     // 0 to 5
+    int lane_id = tid % 32;     // 0 to 31
+    int out_batch_offset = batch_idx * NUM_PATCHES * EMBED_DIM;
+
+    for (int iter = 0; iter < 32; iter++) {
+        int out_dim_base = iter * 24 + warp_id * 4;
         
-        // Ampere architecture can do 128-bit float4 operations, so we can process 4 elements at a time.
-         float4* weights_vec = reinterpret_cast<float4*>(&weights[out_dim * PATCH_VOLUME]);
-         float4* patch_vec = reinterpret_cast<float4*>(patch_s);
+        float4 sum = {0.0f, 0.0f, 0.0f, 0.0f};
+
+        // Warp loops over the 192 float4s of the patch.
+        // 192 / 32 = 6 float4s per thread
+        const float4* w_base = reinterpret_cast<const float4*>(weights);
         
-        float sum = 0.0f;
-        
-        // Loop runs 192 times instead of 768. Partially unrolled.
-        #pragma unroll 4
-        for (int i = 0; i < PATCH_VOLUME / 4; i++) {
-            float4 w = weights_vec[i];
-            float4 p = patch_vec[i];
-            sum += p.x * w.x + p.y * w.y + p.z * w.z + p.w * w.w;
+        #pragma unroll
+        for (int step = 0; step < 6; step++) {
+            int i = step * 32 + lane_id; // float4 index
+            float4 p = patch_s[i];
+            
+            // Fully coalesced loads from global memory!
+            float4 w0 = w_base[ (out_dim_base + 0) * 192 + i ];
+            float4 w1 = w_base[ (out_dim_base + 1) * 192 + i ];
+            float4 w2 = w_base[ (out_dim_base + 2) * 192 + i ];
+            float4 w3 = w_base[ (out_dim_base + 3) * 192 + i ];
+            
+            sum.x = __fmaf_rn(p.x, w0.x, sum.x);
+            sum.x = __fmaf_rn(p.y, w0.y, sum.x);
+            sum.x = __fmaf_rn(p.z, w0.z, sum.x);
+            sum.x = __fmaf_rn(p.w, w0.w, sum.x);
+
+            sum.y = __fmaf_rn(p.x, w1.x, sum.y);
+            sum.y = __fmaf_rn(p.y, w1.y, sum.y);
+            sum.y = __fmaf_rn(p.z, w1.z, sum.y);
+            sum.y = __fmaf_rn(p.w, w1.w, sum.y);
+
+            sum.z = __fmaf_rn(p.x, w2.x, sum.z);
+            sum.z = __fmaf_rn(p.y, w2.y, sum.z);
+            sum.z = __fmaf_rn(p.z, w2.z, sum.z);
+            sum.z = __fmaf_rn(p.w, w2.w, sum.z);
+
+            sum.w = __fmaf_rn(p.x, w3.x, sum.w);
+            sum.w = __fmaf_rn(p.y, w3.y, sum.w);
+            sum.w = __fmaf_rn(p.z, w3.z, sum.w);
+            sum.w = __fmaf_rn(p.w, w3.w, sum.w);
         }
 
-        // Find the starting point of the current batch in the output tensor
-        int out_batch_offset = batch_idx * NUM_PATCHES * EMBED_DIM;
-        out[out_batch_offset + (patch_idx * EMBED_DIM) + out_dim] = sum;
+        sum.x = warp_reduce_sum(sum.x);
+        sum.y = warp_reduce_sum(sum.y);
+        sum.z = warp_reduce_sum(sum.z);
+        sum.w = warp_reduce_sum(sum.w);
+
+        // Store back exactly 4 floats (1 float4) aligned perfectly in memory
+        if (lane_id == 0) {
+            int out_offset = out_batch_offset + patch_idx * EMBED_DIM + out_dim_base;
+            reinterpret_cast<float4*>(out + out_offset)[0] = sum;
+        }
     }
 }
 
 void launch_patch_embed(float* img, float* weights, float* out, int batch_size) {
     dim3 grid(NUM_PATCHES, batch_size); 
-    dim3 block(PATCH_AREA);
+    dim3 block(192); // Optimally reduced to exactly 192 threads
     patch_embed_kernel<<<grid, block>>>(img, weights, out);
 }
