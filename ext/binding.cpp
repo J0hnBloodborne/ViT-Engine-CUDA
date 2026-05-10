@@ -3,7 +3,7 @@
 
 // Forward declarations
 at::Tensor flash_attn_2(at::Tensor Q, at::Tensor K, at::Tensor V, float scale);
-at::Tensor patch_embed(at::Tensor img, at::Tensor weights);
+at::Tensor patch_embed(at::Tensor img, at::Tensor weights, c10::optional<at::Tensor> bias_opt = c10::nullopt);
 at::Tensor pos_encoding(at::Tensor patches, at::Tensor cls_token, at::Tensor pos_embeddings);
 std::vector<at::Tensor> mlp_forward(at::Tensor X, at::Tensor W1, at::Tensor B1, at::Tensor W2, at::Tensor B2);
 at::Tensor layernorm_forward(at::Tensor X, at::Tensor gamma, at::Tensor beta, float eps);

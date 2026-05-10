@@ -6,3 +6,8 @@ dist/
 vitvenv/
 *.pyd
 models/
+caltech-256/
+data/
+*.JPEG
+data/*
+data/imagenette2-320/

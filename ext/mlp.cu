@@ -110,9 +110,9 @@ void mlp_forward_cuda(const float* X, const float* W1, const float* B1, const fl
     
     // Pass 1: X @ W1^T + B1 -> H, followed by GELU
     dim3 grid1((E_expand + TILE - 1) / TILE, (M + TILE - 1) / TILE);
-    mlp_linear_kernel_vec<true><<<grid1, block>>>(X, W1, B1, H, M, E, E_expand);
+    mlp_linear_kernel<true><<<grid1, block>>>(X, W1, B1, H, M, E, E_expand);
 
     // Pass 2: H @ W2^T + B2 -> O
     dim3 grid2((E + TILE - 1) / TILE, (M + TILE - 1) / TILE);
-    mlp_linear_kernel_vec<false><<<grid2, block>>>(H, W2, B2, O, M, E_expand, E);
+    mlp_linear_kernel<false><<<grid2, block>>>(H, W2, B2, O, M, E_expand, E);
 }

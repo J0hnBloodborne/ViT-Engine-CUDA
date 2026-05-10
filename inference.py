@@ -1,28 +1,167 @@
-
+import argparse
+import math
+import urllib.request
+import json
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torchvision import transforms
+from PIL import Image
+import timm
+
+# Import your compiled C++ extension
+import vit_cuda
+
+class ViTBlockCUDA(nn.Module):
+    def __init__(self, state, idx):
+        super().__init__()
+        prefix = f'blocks.{idx}.'
+        
+        self.register_buffer('norm1_gamma', state[prefix + 'norm1.weight'])
+        self.register_buffer('norm1_beta', state[prefix + 'norm1.bias'])
+        
+        self.register_buffer('qkv_weight', state[prefix + 'attn.qkv.weight'])
+        self.register_buffer('qkv_bias', state[prefix + 'attn.qkv.bias'])
+        self.register_buffer('proj_weight', state[prefix + 'attn.proj.weight'])
+        self.register_buffer('proj_bias', state[prefix + 'attn.proj.bias'])
+        
+        self.register_buffer('norm2_gamma', state[prefix + 'norm2.weight'])
+        self.register_buffer('norm2_beta', state[prefix + 'norm2.bias'])
+        
+        self.register_buffer('fc1_weight', state[prefix + 'mlp.fc1.weight'])
+        self.register_buffer('fc1_bias', state[prefix + 'mlp.fc1.bias'])
+        self.register_buffer('fc2_weight', state[prefix + 'mlp.fc2.weight'])
+        self.register_buffer('fc2_bias', state[prefix + 'mlp.fc2.bias'])
+
+    def forward(self, x, scale, eps):
+        residual = x
+        x = vit_cuda.layernorm_forward(x, self.norm1_gamma, self.norm1_beta, eps)
+
+        # qkv projection: result is [B, N, 3*E]
+        qkv = F.linear(x, self.qkv_weight, self.qkv_bias)
+        B, N, threeE = qkv.shape
+        E = threeE // 3
+        qkv = qkv.view(B, N, 3, E).contiguous()
+        q = qkv[:, :, 0, :]
+        k = qkv[:, :, 1, :]
+        v = qkv[:, :, 2, :]
+
+        attn_out = vit_cuda.flash_attn_2(q, k, v, scale)
+        attn_out = F.linear(attn_out, self.proj_weight, self.proj_bias)
+        
+        x = residual + attn_out
+        residual = x
+        
+        x = vit_cuda.layernorm_forward(x, self.norm2_gamma, self.norm2_beta, eps)
+
+        mlp_out_list = vit_cuda.mlp_forward(
+            x, 
+            self.fc1_weight, self.fc1_bias, 
+            self.fc2_weight, self.fc2_bias
+        )
+        # wrapper returns [O, H]
+        mlp_out = mlp_out_list[0]
+        
+        return residual + mlp_out
+
+class ViTCUDA(nn.Module):
+    def __init__(self, num_classes=1000):
+        super().__init__()
+        
+        # Load pre-trained weights from standard timm model
+        model = timm.create_model('vit_base_patch16_224', pretrained=True)
+        state = model.state_dict()
+        
+        self.num_classes = num_classes
+        self.scale = 1.0 / math.sqrt(64)
+        self.eps = 1e-6
+        
+        # patch projection conv weight -> reshape to [embed_dim, patch_volume] at forward time
+        self.register_buffer('patch_weight', state['patch_embed.proj.weight'])
+        self.register_buffer('patch_bias', state['patch_embed.proj.bias'])
+        # cls_token is [1,1,E] in timm; keep as [1, E] and expand per-batch in forward
+        self.register_buffer('cls_token', state['cls_token'].squeeze(0))
+        # pos_embed: [1, seq_len+1, E] -> [seq_len+1, E]
+        self.register_buffer('pos_embed', state['pos_embed'].squeeze(0))
+        
+        self.blocks = nn.ModuleList([ViTBlockCUDA(state, i) for i in range(12)])
+        
+        self.register_buffer('norm_gamma', state['norm.weight'])
+        self.register_buffer('norm_beta', state['norm.bias'])
+        
+        self.register_buffer('head_weight', state['head.weight'])
+        self.register_buffer('head_bias', state['head.bias'])
+
+    def forward(self, x):
+        # reshape patch conv weights -> [embed_dim, patch_volume]
+        pw = self.patch_weight
+        if pw.dim() == 4:
+            pw2 = pw.reshape(pw.size(0), -1)
+        else:
+            pw2 = pw
+
+        x = vit_cuda.patch_embed(x, pw2, self.patch_bias)
+
+        # expand cls_token to batch size expected by pos_encoding wrapper
+        B = x.size(0)
+        cls = self.cls_token
+        if cls.dim() == 1:
+            cls = cls.unsqueeze(0)
+        cls_b = cls.expand(B, -1).contiguous()
+
+        x = vit_cuda.pos_encoding(x, cls_b, self.pos_embed)
+        
+        for block in self.blocks:
+            x = block(x, self.scale, self.eps)
+            
+        x = vit_cuda.layernorm_forward(x, self.norm_gamma, self.norm_beta, self.eps)
+        out = vit_cuda.classifier_forward(x, self.head_weight, self.head_bias)
+        
+        return out
+
+def get_imagenet_labels():
+    url = "https://raw.githubusercontent.com/anishathalye/imagenet-simple-labels/master/imagenet-simple-labels.json"
+    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+    with urllib.request.urlopen(req) as response:
+        return json.loads(response.read().decode())
 
 def main():
-	if not torch.cuda.is_available():
-		print("CUDA is not available. Please run on a CUDA-enabled machine.")
-		return
+    parser = argparse.ArgumentParser(description="Run Custom CUDA ViT Inference")
+    parser.add_argument('--image', type=str, required=True, help="Path to input image")
+    args = parser.parse_args()
 
-	# Create a small random tensor on the GPU
-	x = torch.randn(4, 4, device='cuda', dtype=torch.float32)
-	x_clone = x.clone()
+    # Standard ImageNet preprocessing
+    transform = transforms.Compose([
+        transforms.Resize(256),
+        transforms.CenterCrop(224),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    ])
 
-	try:
-		import vit_cuda
-	except Exception as e:
-		print("Failed to import vit_cuda extension:", e)
-		return
+    image = Image.open(args.image).convert('RGB')
+    input_tensor = transform(image).unsqueeze(0).cuda()
 
-	print("Input tensor:\n", x)
-	y = vit_cuda.attention_mul2(x)
-	print("Output tensor:\n", y)
-	# Verify result
-	expected = x_clone * 2
-	print("Verification (allclose):", torch.allclose(y, expected))
+    model = ViTCUDA().cuda()
+    model.eval()
 
+    labels = get_imagenet_labels()
 
-if __name__ == '__main__':
-	main()
+    # Warmup
+    with torch.no_grad():
+        _ = model(input_tensor)
+
+    # Actual inference
+    with torch.no_grad():
+        output = model(input_tensor)
+        probabilities = torch.nn.functional.softmax(output[0], dim=0)
+
+    top5_prob, top5_catid = torch.topk(probabilities, 5)
+
+    print(f"\nPredictions for {args.image}:")
+    for i in range(top5_prob.size(0)):
+        class_id = top5_catid[i].item()
+        score = top5_prob[i].item()
+        print(f"{i+1}: {labels[class_id]} ({score * 100:.2f}%)")
+
+if __name__ == "__main__":
+    main()
