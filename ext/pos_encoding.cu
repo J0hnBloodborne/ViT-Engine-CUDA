@@ -15,7 +15,7 @@ __global__ void pos_encoding_kernel(const float* __restrict__ patches, const flo
     float4 p_val = pos_vec[tid];
 
     if (seq_idx == 0) {
-        const float4* cls_vec = reinterpret_cast<const float4*>(&cls_token[batch_idx * EMBED_DIM]);
+        const float4* cls_vec = reinterpret_cast<const float4*>(&cls_token[0]);
         float4 c_val = cls_vec[tid];
         
         float4 res;

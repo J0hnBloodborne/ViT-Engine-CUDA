@@ -64,6 +64,25 @@ def fmt(m):
     return f"L2={m['l2']:.6f}, maxabs={m['maxabs']:.6f}, meanabs={m['meanabs']:.6f}, cos={m['cosine']:.6f}"
 
 
+def print_cmp(label, a, b):
+    m = compare_np(as_np(a), as_np(b))
+    print(f'{label}:', fmt(m))
+    return m
+
+
+def manual_attention_from_qkv(q, k, v, num_heads, scale):
+    b, n, e = q.shape
+    head_dim = e // num_heads
+    q = q.reshape(b, n, num_heads, head_dim).permute(0, 2, 1, 3).contiguous()
+    k = k.reshape(b, n, num_heads, head_dim).permute(0, 2, 1, 3).contiguous()
+    v = v.reshape(b, n, num_heads, head_dim).permute(0, 2, 1, 3).contiguous()
+
+    attn = torch.matmul(q, k.transpose(-2, -1)) * scale
+    attn = torch.softmax(attn, dim=-1)
+    out = torch.matmul(attn, v)
+    return out.permute(0, 2, 1, 3).contiguous().reshape(b, n, e)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--image', default='tests/sample.jpg')
@@ -154,12 +173,84 @@ def main():
     for i in range(num_blocks):
         block_t = timm_model.blocks[i]
         block_v = vit_model.blocks[i]
-        x_t_next = block_t(x_t_cur)
-        # vit block signature: block(x, scale, eps)
-        x_v_next = block_v(x_v_cur, vit_model.scale, vit_model.eps)
+
+        print(f'\n-- Block {i} --')
+
+        # Norm 1
+        t_norm1 = block_t.norm1(x_t_cur)
+        v_norm1 = vit_cuda.layernorm_forward(x_v_cur, block_v.norm1_gamma, block_v.norm1_beta, vit_model.eps)
+        print_cmp('norm1', t_norm1, v_norm1)
+
+        # QKV projection
+        t_qkv = F.linear(t_norm1, block_t.attn.qkv.weight, block_t.attn.qkv.bias)
+        v_qkv = F.linear(v_norm1, block_v.qkv_weight, block_v.qkv_bias)
+        print_cmp('qkv', t_qkv, v_qkv)
+
+        # Split Q/K/V for attention
+        t_B, t_N, t_threeE = t_qkv.shape
+        t_E = t_threeE // 3
+        t_qkv_view = t_qkv.reshape(t_B, t_N, 3, t_E).contiguous()
+        t_q = t_qkv_view[:, :, 0, :].contiguous()
+        t_k = t_qkv_view[:, :, 1, :].contiguous()
+        t_v = t_qkv_view[:, :, 2, :].contiguous()
+
+        v_B, v_N, v_threeE = v_qkv.shape
+        v_E = v_threeE // 3
+        v_qkv_view = v_qkv.reshape(v_B, v_N, 3, v_E).contiguous()
+        v_q = v_qkv_view[:, :, 0, :].contiguous()
+        v_k = v_qkv_view[:, :, 1, :].contiguous()
+        v_v = v_qkv_view[:, :, 2, :].contiguous()
+
+        print_cmp('q', t_q, v_q)
+        print_cmp('k', t_k, v_k)
+        print_cmp('v', t_v, v_v)
+
+        # Raw attention output before the projection layer
+        t_attn_raw = manual_attention_from_qkv(t_q, t_k, t_v, block_t.attn.num_heads, block_t.attn.scale)
+        v_attn_raw = vit_cuda.flash_attn_2(v_q, v_k, v_v, vit_model.scale)
+        print_cmp('attn_raw', t_attn_raw, v_attn_raw)
+
+        # Attention projection + residual
+        t_proj = F.linear(t_attn_raw, block_t.attn.proj.weight, block_t.attn.proj.bias)
+        v_proj = F.linear(v_attn_raw, block_v.proj_weight, block_v.proj_bias)
+        print_cmp('attn_proj', t_proj, v_proj)
+
+        t_res1 = x_t_cur + t_proj
+        v_res1 = x_v_cur + v_proj
+        print_cmp('residual1', t_res1, v_res1)
+
+        # Norm 2
+        t_norm2 = block_t.norm2(t_res1)
+        v_norm2 = vit_cuda.layernorm_forward(v_res1, block_v.norm2_gamma, block_v.norm2_beta, vit_model.eps)
+        print_cmp('norm2', t_norm2, v_norm2)
+
+        # MLP substeps
+        t_mlp_fc1 = block_t.mlp.fc1(t_norm2)
+        v_mlp_fc1 = F.linear(t_norm2, block_v.fc1_weight, block_v.fc1_bias)
+        print_cmp('mlp_fc1', t_mlp_fc1, v_mlp_fc1)
+
+        t_mlp_act = block_t.mlp.act(t_mlp_fc1)
+        # Match the kernel's exact erf GELU when comparing to vit_cuda
+        v_mlp_act = torch.nn.functional.gelu(v_mlp_fc1, approximate='none')
+        print_cmp('mlp_act', t_mlp_act, v_mlp_act)
+
+        t_mlp_fc2 = block_t.mlp.fc2(t_mlp_act)
+        v_mlp_fc2, v_mlp_hidden = vit_cuda.mlp_forward(
+            v_norm2,
+            block_v.fc1_weight,
+            block_v.fc1_bias,
+            block_v.fc2_weight,
+            block_v.fc2_bias,
+        )
+        # vit_cuda returns [O, H]; compare the output and hidden activations separately
+        print_cmp('mlp_hidden', v_mlp_hidden, v_mlp_act)
+        print_cmp('mlp_fc2', t_mlp_fc2, v_mlp_fc2)
+
+        x_t_next = t_res1 + t_mlp_fc2
+        x_v_next = v_res1 + v_mlp_fc2
 
         m_block = compare_np(as_np(x_t_next), as_np(x_v_next))
-        print(f'block {i}:', fmt(m_block))
+        print('block output:', fmt(m_block))
 
         x_t_cur = x_t_next
         x_v_cur = x_v_next
