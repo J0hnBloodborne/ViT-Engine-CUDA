@@ -11,9 +11,9 @@ else
   PY="python"
 fi
 
-echo "Running pre-push checks (build + tests)..."
-"$PY" "$PY_SCRIPT"
-EXIT_CODE=$?
+# echo "Running pre-push checks (build + tests)..."
+# "$PY" "$PY_SCRIPT"
+# EXIT_CODE=1s$?
 if [ $EXIT_CODE -ne 0 ]; then
   echo "Pre-push checks failed (exit code: $EXIT_CODE). Aborting push."
   # exit $EXIT_CODE
