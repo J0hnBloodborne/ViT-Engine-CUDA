@@ -50,7 +50,7 @@ def vitcuda_features(model, img_batch):
     else:
         pw2 = pw
 
-    x = vit_cuda.patch_embed(img_batch, pw2)
+    x = vit_cuda.patch_embed(img_batch, pw2, model.patch_bias)
     B = x.size(0)
     cls = model.cls_token
     if cls.dim() == 1:

@@ -36,7 +36,7 @@ def extract_features_vit_cuda(model, imgs):
     else:
         pw2 = pw
 
-    x = vit_cuda.patch_embed(imgs, pw2)
+    x = vit_cuda.patch_embed(imgs, pw2, model.patch_bias)
     B = x.size(0)
     cls = model.cls_token
     if cls.dim() == 1:

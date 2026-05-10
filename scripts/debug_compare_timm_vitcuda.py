@@ -50,7 +50,7 @@ def get_vitcuda_features(model, x, device):
         else:
             pw2 = pw.to(x.device)
         # patch embedding
-        xb = vit_cuda.patch_embed(x, pw2)
+        xb = vit_cuda.patch_embed(x, pw2, model.patch_bias)
         B = xb.size(0)
         cls = model.cls_token
         if cls.dim() == 1:

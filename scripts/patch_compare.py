@@ -106,7 +106,7 @@ def main():
         pw2 = pw.reshape(pw.size(0), -1).to(device)
     else:
         pw2 = pw.to(device)
-    p_v = vit_cuda.patch_embed(x, pw2)
+    p_v = vit_cuda.patch_embed(x, pw2, vit_model.patch_bias)
     p_v_seq = p_v.cpu().numpy()
 
     print('Shapes: timm', p_t_seq.shape, 'vit_cuda', p_v_seq.shape)

@@ -96,7 +96,7 @@ def main():
         pw2 = pw.reshape(pw.size(0), -1).to(device)
     else:
         pw2 = pw.to(device)
-    p_v_seq = vit_cuda.patch_embed(x, pw2)
+    p_v_seq = vit_cuda.patch_embed(x, pw2, vit_model.patch_bias)
 
     m_patch = compare_np(as_np(p_t_seq), as_np(p_v_seq))
     print('patch compare:', fmt(m_patch))
