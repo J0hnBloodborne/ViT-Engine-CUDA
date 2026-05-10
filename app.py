@@ -4,6 +4,9 @@ import torch
 from torchvision import transforms
 import gradio as gr
 
+torch.backends.cuda.matmul.allow_tf32 = False
+torch.backends.cudnn.allow_tf32 = False
+
 from inference import ViTCUDA, get_imagenet_labels
 
 IMAGENET_MEAN = [0.485, 0.456, 0.406]

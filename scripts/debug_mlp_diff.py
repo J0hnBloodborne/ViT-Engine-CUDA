@@ -1,4 +1,8 @@
 import torch
+
+torch.backends.cuda.matmul.allow_tf32 = False
+torch.backends.cudnn.allow_tf32 = False
+
 import vit_cuda
 import math
 
@@ -26,11 +30,7 @@ O_cuda, H_cuda = vit_cuda.mlp_forward(X, W1, B1, W2, B2)
 M = B * N
 X_mat_gpu = X.reshape(M, E)
 def gelu_approx(x):
-    SQRT_2_OVER_PI = 0.7978845608
-    COEF = 0.044715
-    z = SQRT_2_OVER_PI * x * (1.0 + COEF * x * x)
-    z = torch.clamp(z, -20.0, 20.0)
-    return 0.5 * x * (1.0 + torch.tanh(z))
+    return 0.5 * x * (1.0 + torch.erf(x / math.sqrt(2)))
 
 H_expected_gpu = X_mat_gpu.matmul(W1.t()) + B1.unsqueeze(0)
 H_expected_gpu = gelu_approx(H_expected_gpu)

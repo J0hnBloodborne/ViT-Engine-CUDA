@@ -2,6 +2,9 @@ import os
 import pytest
 import torch
 
+torch.backends.cuda.matmul.allow_tf32 = False
+torch.backends.cudnn.allow_tf32 = False
+
 # Toggle: only run when 'pos_encoding' present in KERNELS env
 kernels_env = os.getenv('KERNELS', 'patch_embed')
 if 'pos_encoding' not in kernels_env.split(','):

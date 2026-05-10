@@ -13,6 +13,8 @@ import os
 import sys
 import subprocess
 
+os.environ['TORCH_ALLOW_TF32_CUBLAS_OVERRIDE'] = '0'
+
 
 def find_venv_python(repo_root):
     p1 = os.path.join(repo_root, 'vitvenv', 'bin', 'python')

@@ -11,6 +11,10 @@ from tqdm import tqdm
 
 import torch
 import torch.nn.functional as F
+
+torch.backends.cuda.matmul.allow_tf32 = False
+torch.backends.cudnn.allow_tf32 = False
+
 from torchvision import transforms, datasets
 
 try:

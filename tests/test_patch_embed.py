@@ -2,6 +2,9 @@ import os
 import pytest
 import torch
 
+torch.backends.cuda.matmul.allow_tf32 = False
+torch.backends.cudnn.allow_tf32 = False
+
 # Toggle: only run when 'patch_embed' present in KERNELS env (default enabled)
 kernels_env = os.getenv('KERNELS', 'patch_embed')
 if 'patch_embed' not in kernels_env.split(','):
@@ -34,8 +37,9 @@ def test_patch_embed_basic():
 
     img = img_cpu.cuda()
     weights = weights_cpu.cuda()
+    bias = torch.zeros(EMBED_DIM, dtype=torch.float32, device='cuda')
 
-    out = vit_cuda.patch_embed(img, weights)
+    out = vit_cuda.patch_embed(img, weights, bias)
     assert out.device.type == 'cuda'
 
     out_cpu = out.cpu()
@@ -49,7 +53,7 @@ def test_patch_embed_basic():
         patches.append(patch)
     patches = torch.stack(patches, dim=0)  # [num_patches, patch_volume]
 
-    expected = patches.matmul(weights_cpu.t()).unsqueeze(0)  # [1, num_patches, embed_dim]
+    expected = patches.matmul(weights_cpu.t()).unsqueeze(0) + bias.cpu().view(1, 1, -1)
 
     assert expected.shape == out_cpu.shape
     assert torch.allclose(out_cpu, expected, atol=1e-4)

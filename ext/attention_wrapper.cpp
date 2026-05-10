@@ -19,6 +19,9 @@ at::Tensor flash_attn_2(at::Tensor Q, at::Tensor K, at::Tensor V, float scale) {
     
     TORCH_CHECK(E == 768, "E dimension must be 768");
 
+    auto Qc = Q.contiguous(); // Ensures the Q tensor is contiguous in memory
+    auto Kc = K.contiguous(); // Ensures the K tensor is contiguous in memory
+    auto Vc = V.contiguous(); // Ensures the V tensor is contiguous in memory
     auto O = at::zeros_like(Q);
 
     flash_attn_2_forward_cuda(

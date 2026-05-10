@@ -16,6 +16,9 @@ import sys
 import subprocess
 from pathlib import Path
 
+os.environ['PYTORCH_CUDA_ALLOC_CONF'] = os.environ.get('PYTORCH_CUDA_ALLOC_CONF', '')
+os.environ['TORCH_ALLOW_TF32_CUBLAS_OVERRIDE'] = '0'
+
 
 def run(cmd, check=True):
     print('RUN:', ' '.join(cmd))
