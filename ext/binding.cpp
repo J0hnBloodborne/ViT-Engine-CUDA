@@ -6,6 +6,7 @@ at::Tensor flash_attn_2(at::Tensor Q, at::Tensor K, at::Tensor V, float scale);
 at::Tensor patch_embed(at::Tensor img, at::Tensor weights);
 at::Tensor pos_encoding(at::Tensor patches, at::Tensor cls_token, at::Tensor pos_embeddings);
 std::vector<at::Tensor> mlp_forward(at::Tensor X, at::Tensor W1, at::Tensor B1, at::Tensor W2, at::Tensor B2);
+at::Tensor layernorm_forward(at::Tensor X, at::Tensor gamma, at::Tensor beta, float eps);
 
 PYBIND11_MODULE(vit_cuda, m) {
     m.doc() = "vit_cuda extension (Flash Attention 2 implemented)";
@@ -13,4 +14,6 @@ PYBIND11_MODULE(vit_cuda, m) {
     m.def("patch_embed", &patch_embed, "Patch embedding (CUDA)");
     m.def("pos_encoding", &pos_encoding, "Add positional encoding (CUDA)");
     m.def("mlp_forward", &mlp_forward, "Fused MLP Block (GEMM + bias + GeLU)");
+    m.def("layernorm_forward", &layernorm_forward, "Fused LayerNorm forward pass");
+    // m.def("classifier_forward", &classifier_forward, "Fused classifier forward pass");
 }

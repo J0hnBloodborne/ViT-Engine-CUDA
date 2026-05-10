@@ -41,6 +41,5 @@ std::vector<at::Tensor> mlp_forward(
         B, N, E, E_expand
     );
 
-    // Returning both O and H (H might be useful for backwards pass later)
     return {O, H};
 }

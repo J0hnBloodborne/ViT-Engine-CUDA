@@ -7,13 +7,7 @@
 // Fused Linear + optional GELU kernel
 // Assumes W is in PyTorch format: [N_out, K]
 template <bool UseGeLU>
-__global__ void mlp_linear_kernel(
-    const float* __restrict__ X,      // [M, K]
-    const float* __restrict__ W,      // [N_out, K]
-    const float* __restrict__ B_bias, // [N_out]
-    float* __restrict__ Y,            // [M, N_out]
-    int M, int K, int N_out
-) {
+__global__ void mlp_linear_kernel(const float* __restrict__ X, const float* __restrict__ W, const float* __restrict__ B_bias, float* __restrict__ Y, int M, int K, int N_out) {
     int row = blockIdx.y * TILE + threadIdx.y;
     int col = blockIdx.x * TILE + threadIdx.x;
 
@@ -76,12 +70,7 @@ __global__ void mlp_linear_kernel(
     }
 }
 
-void mlp_forward_cuda(
-    const float* X, const float* W1, const float* B1, 
-    const float* W2, const float* B2, 
-    float* H, float* O, 
-    int B, int N, int E, int E_expand
-) {
+void mlp_forward_cuda(const float* X, const float* W1, const float* B1, const float* W2, const float* B2, float* H, float* O, int B, int N, int E, int E_expand) {
     int M = B * N;
     dim3 block(TILE, TILE);
     

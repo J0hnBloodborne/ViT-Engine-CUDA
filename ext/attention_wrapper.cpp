@@ -17,7 +17,7 @@ at::Tensor flash_attn_2(at::Tensor Q, at::Tensor K, at::Tensor V, float scale) {
     int N = Q.size(1);
     int E = Q.size(2);
     
-    TORCH_CHECK(E == 768, "Highly optimized flash_attn_2 currently only supports E=768 (12 heads of 64)");
+    TORCH_CHECK(E == 768, "E dimension must be 768");
 
     auto O = at::zeros_like(Q);
 

@@ -14,14 +14,7 @@
 #define BR 8 // WARPS_PER_BLOCK * ROWS_PER_WARP
 #define BC 16
 
-__global__ void flash_attn_2_ampere_768(
-    const float* __restrict__ Q, // [B, N, 768]
-    const float* __restrict__ K, // [B, N, 768]
-    const float* __restrict__ V, // [B, N, 768]
-    float* __restrict__ O,       // [B, N, 768]
-    int B, int N,
-    float scale
-) {
+__global__ void flash_attn_2_ampere_768(const float* __restrict__ Q, const float* __restrict__ K, const float* __restrict__ V, float* __restrict__ O, int B, int N,float scale) {
     int b = blockIdx.x / H_DIM;
     int h = blockIdx.x % H_DIM;
     int i_start = blockIdx.y * BR;
@@ -171,10 +164,7 @@ __global__ void flash_attn_2_ampere_768(
     }
 }
 
-void flash_attn_2_forward_cuda(
-    const float* Q, const float* K, const float* V, float* O,
-    int B, int N, float scale
-) {
+void flash_attn_2_forward_cuda(const float* Q, const float* K, const float* V, float* O, int B, int N, float scale) {
     dim3 grid(B * H_DIM, (N + BR - 1) / BR);
     dim3 block(THREADS_PER_BLOCK);
 
