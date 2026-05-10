@@ -6,15 +6,15 @@
       "total": 200,
       "k": 5
     },
-    "mean_latency_ms_per_image": 4.765746526718139
+    "mean_latency_ms_per_image": 5.697339839935303
   },
   "vit_cuda": {
     "knn": {
-      "top1": 26,
-      "topk_any": 82,
+      "top1": 199,
+      "topk_any": 200,
       "total": 200,
       "k": 5
     },
-    "mean_latency_ms_per_image": 10.349130458831787
+    "mean_latency_ms_per_image": 11.35009672164917
   }
 }

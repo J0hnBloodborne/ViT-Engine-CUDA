@@ -25,9 +25,9 @@ at::Tensor flash_attn_2(at::Tensor Q, at::Tensor K, at::Tensor V, float scale) {
     auto O = at::zeros_like(Q);
 
     flash_attn_2_forward_cuda(
-        Q.data_ptr<float>(),
-        K.data_ptr<float>(),
-        V.data_ptr<float>(),
+        Qc.data_ptr<float>(),
+        Kc.data_ptr<float>(),
+        Vc.data_ptr<float>(),
         O.data_ptr<float>(),
         B, N, scale
     );

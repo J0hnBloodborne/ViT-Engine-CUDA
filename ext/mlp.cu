@@ -104,8 +104,7 @@ __global__ void mlp_linear_kernel(
     }
 }
 
-void mlp_forward_cuda(const float* X, const float* W1, const float* B1, const float* W2, const float* B2, float* H, float* O, int B, int N, int E, int E_expand) {
-    int M = B * N;
+void mlp_forward_cuda(const float* X, const float* W1, const float* B1, const float* W2, const float* B2, float* H, float* O, int M, int E, int E_expand) {
     dim3 block(256); // Exactly 256 threads
     
     // Pass 1: X @ W1^T + B1 -> H, followed by GELU

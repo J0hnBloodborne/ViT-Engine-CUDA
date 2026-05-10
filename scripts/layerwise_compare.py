@@ -101,6 +101,7 @@ def main():
     vit_model = ViTCUDA().to(device).eval()
 
     x = preprocess_image(img_path, device)
+    x = torch.cat([x, x], dim=0) # Batch size 2
 
     B = x.size(0)
 

@@ -5,7 +5,7 @@ void mlp_forward_cuda(
     const float* X, const float* W1, const float* B1, 
     const float* W2, const float* B2, 
     float* H, float* O, 
-    int B, int N, int E, int E_expand
+    int M, int E, int E_expand
 );
 
 std::vector<at::Tensor> mlp_forward(
@@ -39,12 +39,14 @@ std::vector<at::Tensor> mlp_forward(
     auto H = at::empty({B, N, E_expand}, X_c.options());
     auto O = at::empty({B, N, E}, X_c.options());
 
+    int M = B * N;
+
     mlp_forward_cuda(
         X_c.data_ptr<float>(),
         W1_c.data_ptr<float>(), B1_c.data_ptr<float>(),
         W2_c.data_ptr<float>(), B2_c.data_ptr<float>(),
         H.data_ptr<float>(), O.data_ptr<float>(),
-        B, N, E, E_expand
+        M, E, E_expand
     );
 
     return {O, H};

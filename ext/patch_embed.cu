@@ -107,8 +107,8 @@ __global__ void patch_embed_kernel(const float* __restrict__ img, const float* _
     }
 }
 
-void launch_patch_embed(float* img, float* weights, float* out, int batch_size) {
-    dim3 grid(NUM_PATCHES, batch_size); 
+void launch_patch_embed(float* img, float* weights, float* out, int B) {
+    dim3 grid(196, B); 
     dim3 block(192); // Optimally reduced to exactly 192 threads
     patch_embed_kernel<<<grid, block>>>(img, weights, out);
 }
