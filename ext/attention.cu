@@ -110,14 +110,15 @@ __global__ void flash_attn_2_ampere_768(
             dot = __fmaf_rn(q_vec.z, k_vec.z, dot);
             dot = __fmaf_rn(q_vec.w, k_vec.w, dot);
             
-            // Fast Ampere intra-warp reduction bounded to 16 threads
-            dot += __shfl_down_sync(0xffffffff, dot, 8, 16);
-            dot += __shfl_down_sync(0xffffffff, dot, 4, 16);
-            dot += __shfl_down_sync(0xffffffff, dot, 2, 16);
-            dot += __shfl_down_sync(0xffffffff, dot, 1, 16);
+            // Fast Ampere intra-warp reduction
+            dot += __shfl_down_sync(0xffffffff, dot, 8);
+            dot += __shfl_down_sync(0xffffffff, dot, 4);
+            dot += __shfl_down_sync(0xffffffff, dot, 2);
+            dot += __shfl_down_sync(0xffffffff, dot, 1);
             
-            // Broadcast from relative lane 0 of each 16-thread segment
-            dot = __shfl_sync(0xffffffff, dot, 0, 16);
+            // Broadcast
+            if (lane_id < 16) dot = __shfl_sync(0xffffffff, dot, 0);
+            else dot = __shfl_sync(0xffffffff, dot, 16);
             
             dot *= scale;
             if (j_start_curr + j >= N) dot = -INFINITY;

@@ -1,20 +1,20 @@
 {
   "timm": {
     "knn": {
-      "top1": 197,
-      "topk_any": 199,
+      "top1": 199,
+      "topk_any": 200,
       "total": 200,
       "k": 5
     },
-    "mean_latency_ms_per_image": 5.963273730278015
+    "mean_latency_ms_per_image": 4.765746526718139
   },
   "vit_cuda": {
     "knn": {
-      "top1": 15,
-      "topk_any": 73,
+      "top1": 26,
+      "topk_any": 82,
       "total": 200,
       "k": 5
     },
-    "mean_latency_ms_per_image": 11.281607799530029
+    "mean_latency_ms_per_image": 10.349130458831787
   }
 }
