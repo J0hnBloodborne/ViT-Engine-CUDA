@@ -1,44 +1,66 @@
-# ViT Engine CUDA: High-Performance Vision Transformer Backend
+# ViT-Engine-CUDA
 
-This repository contains a custom-built, hardware-accelerated CUDA execution engine for the Vision Transformer (ViT-Base-16) architecture. The implementation bypasses standard PyTorch operations to execute customized memory and math kernels directly on NVIDIA Ampere architecture. 
+A hardware-accelerated, custom CUDA backend for the Vision Transformer (ViT-Base-16). This engine achieves strict mathematical parity with the PyTorch `timm` baseline, bypassing the ATen dispatcher to execute highly tuned mathematical kernels directly on NVIDIA Ampere architecture. Final evaluation score: 199/200 on the Imagenette validation subset.
 
-The custom backend achieves strict mathematical parity with the official PyTorch `timm` baseline, scoring 199/200 on the Imagenette test set, guaranteeing 99.5% accuracy alignment through explicit FP32 enforcement.
+## Progress Documentation
 
-## System Architecture and Kernel Design
+The development of this engine transitioned from individual mathematical operations to a fully integrated PyTorch extension. The progression and resolution of critical roadblocks are documented below.
 
-### 1. Patch Embedding
-The engine implements a specialized 2D convolution kernel. It maps 16x16 pixel image patches directly into 768-dimensional vectors. The kernel handles the necessary memory layout transformations and matrix striding to output the flat sequence required by the transformer.
+### Phase 1: Foundational Kernels
+The initial stage mapped standard tensor operations to CUDA grids.
+* **Patch Embedding:** Implemented a custom 2D convolution kernel mapping 16x16 pixel patches to 768-dimensional vectors. 
+* **Positional Encoding:** Implemented element-wise addition for pre-trained spatial encodings and handled the memory concatenation of the global classification (CLS) token. Fixed an out-of-bounds memory read that initially caused accuracy drops by ensuring the single CLS vector was correctly mapped across all batch dimensions.
+* **Classification Head:** Built a vector-matrix multiplication kernel to isolate the 0th sequence index (CLS token) and project it to target class probabilities.
 
-### 2. Positional Encoding and CLS Token Prepending
-Spatial awareness is injected into the permutation-invariant sequence. The kernel performs an element-wise addition of pre-trained spatial coordinate embeddings. It prepends the global classification (CLS) token to the sequence dimension via direct memory concatenation, expanding the sequence length from 196 to 197.
+### Phase 2: Transformer Block Components
+* **Layer Normalization:** Developed a block-reduction kernel computing mean and variance across the 768-embedding dimension using hardware-level warp shuffle operations (`__shfl_down_sync`).
+* **Multi-Layer Perceptron (MLP):** Developed the feed-forward network expanding to 3072 dimensions. Fixed initial missing bias additions.
 
-### 3. Layer Normalization
-Normalization utilizes a specialized block-reduction kernel. It computes the mean and variance across the 768 embedding dimension using fast hardware-level warp shuffle operations (`__shfl_down_sync`). This avoids shared memory bottlenecks and stabilizes gradients before the attention and feed-forward phases.
+### Phase 3: Flash Attention 2 for Ampere
+The self-attention mechanism was explicitly tuned for RTX 30-series (Ampere) hardware.
+* Setup asynchronous memory pipelines using `__pipeline_memcpy_async` to bypass the L1 cache.
+* Integrated double buffering with shared memory tiles to overlap math execution with data fetching.
+* Applied Online Softmax to fuse the calculation inside SRAM.
+* **Bug Fix:** Corrected an intra-warp reduction issue where `__shfl_down_sync` defaulted to 32 threads. Bounding it strictly to 16 threads prevented mathematical cross-contamination between adjacent tokens processed in the same warp.
 
-### 4. Flash Attention 2 (Ampere Optimized)
-The core self-attention mechanism is a custom implementation of Flash Attention 2, tuned explicitly for RTX 30-series (Ampere) hardware. 
-1. **Asynchronous Memory Pipelines:** Uses the `__pipeline_memcpy_async` intrinsic to fetch Key and Value matrices directly from global memory to shared memory, bypassing the L1 cache.
-2. **Double Buffering:** Allocates four shared memory tiles to overlap math execution with data fetching.
-3. **Bounded Intra-Warp Reductions:** Fixes the warp reduction width strictly to 16 threads, allowing a single 32-thread warp to process two separate tokens simultaneously without cross-contamination.
-4. **Online Softmax:** Calculates running maximums and denominators incrementally to fuse the softmax computation entirely within fast SRAM.
+### Phase 4: Precision and Memory Alignment
+Reaching mathematical parity with PyTorch required resolving hardware and memory discrepancies.
+* **Contiguous Memory:** Standard PyTorch slices utilize strided memory. The engine was updated to explicitly enforce contiguous memory layouts before extracting raw pointers in the C++ wrappers, resolving massive L2 divergence cascades.
+* **TF32 vs FP32:** PyTorch defaults to TensorFloat-32 on Ampere. The test suite was explicitly configured to disable TF32, ensuring PyTorch matched the strict 23-bit FP32 precision (`__fmaf_rn`) executed by the custom kernels.
+* **GELU Precision:** The hardware-accelerated `tanh` approximation initially caused a 91.22 L2 divergence due to a missing scaling constant. This was replaced with the standard mathematical error function (`erff`) scaled by `0.70710678f`, achieving near 0.000000 L2 divergence against PyTorch's native GELU.
 
-### 5. Multi-Layer Perceptron (MLP)
-The feed-forward network expands the 768 dimension to 3072 and compresses it back. The GELU activation function is implemented using the exact mathematical error function (`erff`) and a scaling constant of `0.79788456f`. This prevents the precision drift commonly caused by hardware-accelerated polynomial approximations.
+### Phase 5: Final Validation
+The final hurdle was a batch dimension bug in the grid launch configurations. Hardcoded batch sizes of `1` in the Pybind11 wrappers caused the engine to correctly process only the first image of any batch, returning uninitialized memory for the rest. Scaling the `dim3 grid` configurations dynamically with the batch dimension brought the validation score to 199/200.
 
-### 6. Classification Head
-A highly optimized vector-matrix multiplication kernel isolates the 0th sequence index (the CLS token) and projects it to the target class probabilities, entirely discarding the remaining 196 patch vectors to save computation cycles.
+## Repository Structure
 
-## Core Scripts and Execution
+### Core Extension (`ext/`)
+Contains all C++ and CUDA source code.
+* `setup.py`: Compilation script invoking NVCC and building the Pybind11 shared library.
+* `binding.cpp`: The Pybind11 registry exposing C++ functions to Python.
+* `*_wrapper.cpp`: Thin C++ bridges extracting raw float pointers from `at::Tensor` objects, ensuring memory contiguity, and launching CUDA grids.
+* `*.cu`: The raw CUDA kernels (`attention.cu`, `layernorm.cu`, `mlp.cu`, `patch_embed.cu`, `pos_encoding.cu`, `classifier.cu`).
 
-1. **`inference.py`**: The standard evaluation pipeline. It loads pre-trained `timm` weights into the custom CUDA module and executes ImageNet-standard preprocessing.
-2. **`benchmark.py`**: A latency and throughput measurement tool comparing the native PyTorch implementation against the compiled CUDA extension using CUDA events.
-3. **`app.py`**: A Gradio web application providing a graphical interface for live camera feeds and image file uploads.
-4. **`scripts/eval_imagenette.py`**: The primary validation script. It evaluates top-1 and top-5 accuracy over a 200-image dataset split to verify mathematical correctness.
+### Testing and Validation (`tests/` & `scripts/`)
+* `tests/test_*.py`: Isolated unit tests comparing every individual CUDA kernel against its equivalent PyTorch `torch.nn` layer.
+* `scripts/layerwise_compare.py`: Executes a full forward pass, extracting intermediate activations from both `timm` and `vit_cuda`, calculating L2 norm and max absolute differences for every block.
+* `scripts/eval_imagenette.py`: The main validation script. Loads the Imagenette dataset via `DataLoader`, runs batched inference, calculates Top-1 and Top-5 accuracy, and outputs a PCA projection of the embeddings.
+* `scripts/debug_*.py`: Isolated scratchpad scripts used to trace specific mathematical divergences.
 
-## Compilation and Installation
+### High-Level Application
+* `inference.py`: Standard evaluation pipeline. Instantiates the custom `ViTCUDA` python class, downloads `timm` pre-trained weights, assigns them as registered buffers, and executes image classification.
+* `benchmark.py`: Latency measurement tool using `torch.cuda.Event` to measure execution time differences between the custom backend and native PyTorch.
+* `app.py`: Gradio web application for interactive inference using webcam feeds or uploaded images.
 
-The backend requires the NVIDIA CUDA Toolkit. Compile the `nvcc` kernels and `pybind11` wrappers by executing the setup script in the extension directory.
+## Technical Architecture Details
 
+1. **Memory:** The engine requires strictly contiguous memory blocks. Strided memory is not supported. All PyTorch `[out_features, in_features]` weight matrices are handled natively within the kernels without requiring pre-transposition.
+2. **Grid Parameters:** 768 embedding dimensions and 12 attention heads are hardcoded directly into the C++ configuration to maximize register allocation limits and SM occupancy.
+3. **Read-Only Caching:** Input pointers are decorated with `const float* __restrict__` to force routing through the GPU's dedicated read-only data cache via `__ldg()` intrinsics.
+
+## Usage
+
+**Compilation:**
 ```bash
 cd ext
 python setup.py install
