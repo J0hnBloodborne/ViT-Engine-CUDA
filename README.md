@@ -64,3 +64,7 @@ Contains all C++ and CUDA source code.
 ```bash
 cd ext
 python setup.py install
+```
+
+### Architecture Image
+![vit](image.png)

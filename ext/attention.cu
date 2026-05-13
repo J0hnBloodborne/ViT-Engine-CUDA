@@ -22,9 +22,12 @@ __global__ void flash_attn_2_ampere_768(
     int B, int N,
     float scale
 ) {
+    // which batch are we at
     int b = blockIdx.x / H_DIM;
     int h = blockIdx.x % H_DIM;
+    // where we are in current seq
     int i_start = blockIdx.y * BR;
+    
     
     int tid = threadIdx.x;
     int lane_id = tid % 32;
@@ -61,15 +64,16 @@ __global__ void flash_attn_2_ampere_768(
     // Helper lambda for async loading
     auto load_tile_async = [&](int j_start_val, int buf_idx) {
         for (int load_iter = 0; load_iter < 2; ++load_iter) {
+            // Each iteration loads half the tile (8 rows) for K and V. 128 threads can load 16 rows in total, so each thread loads 1/2 row per iteration.
             int flat_idx = tid + load_iter * THREADS_PER_BLOCK;
             int k_row = flat_idx / VECS_PER_ROW;
             int k_vec = flat_idx % VECS_PER_ROW;
             
-            if (j_start_val + k_row < N) {
+            if (j_start_val + k_row < N) { // bounds check for tile edge
                 int offset = base_offset + ((j_start_val + k_row) * E) + (h * D) + (k_vec * VEC_SIZE);
                 __pipeline_memcpy_async(&s_K[buf_idx][flat_idx], &K[offset], sizeof(float4));
                 __pipeline_memcpy_async(&s_V[buf_idx][flat_idx], &V[offset], sizeof(float4));
-            } else {
+            } else { 
                 s_K[buf_idx][flat_idx] = {0.0f, 0.0f, 0.0f, 0.0f};
                 s_V[buf_idx][flat_idx] = {0.0f, 0.0f, 0.0f, 0.0f};
             }
@@ -78,7 +82,7 @@ __global__ void flash_attn_2_ampere_768(
 
     // Prologue: start loading tile 0
     load_tile_async(0, 0);
-    __pipeline_commit();
+    __pipeline_commit(); // Commit the async loads for the next tile
 
     int num_tiles = (N + BC - 1) / BC;
 
@@ -92,7 +96,7 @@ __global__ void flash_attn_2_ampere_768(
         if (j_start_next < N) {
             load_tile_async(j_start_next, buf_next);
         }
-        __pipeline_commit();
+        __pipeline_commit(); // Commit the async loads for the next tile
 
         // Wait for CURRENT tile to be fully loaded (1 stage remaining in pipeline)
         __pipeline_wait_prior(1);

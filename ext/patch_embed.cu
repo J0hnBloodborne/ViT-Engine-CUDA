@@ -27,6 +27,7 @@ __global__ void patch_embed_kernel(const float* __restrict__ img, const float* _
     // 192 float4s = 768 floats
     __shared__ float4 patch_s[192];
 
+    // Top-left corner of the patch in the original image (y,x)
     int patch_row = (patch_idx / PATCHES_PER_SIDE) * PATCH_SIZE;
     int patch_col = (patch_idx % PATCHES_PER_SIDE) * PATCH_SIZE;
 
@@ -38,6 +39,7 @@ __global__ void patch_embed_kernel(const float* __restrict__ img, const float* _
     int py = tid_in_c / 4;      // 0 to 15 (row within patch)
     int px_vec = tid_in_c % 4;  // 0 to 3 (float4 index within row)
 
+    // 3D Tensor in Channel-major order: [C][H][W]
     int global_offset = c * IMG_SIZE * IMG_SIZE + (patch_row + py) * IMG_SIZE + (patch_col + px_vec * 4);
     
     // Load 1 float4 (16 bytes) cohesively per thread
@@ -51,9 +53,11 @@ __global__ void patch_embed_kernel(const float* __restrict__ img, const float* _
     
     int warp_id = tid / 32;     // 0 to 5
     int lane_id = tid % 32;     // 0 to 31
-    int out_batch_offset = batch_idx * NUM_PATCHES * EMBED_DIM;
+    int out_batch_offset = batch_idx * NUM_PATCHES * EMBED_DIM; // Output offset for the current batch
 
+    // 32 iterations to cover all 768 output dimensions 
     for (int iter = 0; iter < 32; iter++) {
+        // Each warp computes 4 output dimensions in this iteration
         int out_dim_base = iter * 24 + warp_id * 4;
         
         float4 sum = {0.0f, 0.0f, 0.0f, 0.0f};
@@ -110,5 +114,6 @@ __global__ void patch_embed_kernel(const float* __restrict__ img, const float* _
 void launch_patch_embed(float* img, float* weights, float* out, int B) {
     dim3 grid(196, B); 
     dim3 block(192); // Optimally reduced to exactly 192 threads
+    // Overall input image is [B][3][224][224] and weights are [768][768], output is [B][196][768]
     patch_embed_kernel<<<grid, block>>>(img, weights, out);
 }
